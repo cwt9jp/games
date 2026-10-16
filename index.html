@@ -574,18 +574,20 @@
                     
                 }
 
+                if (gameSize.tileHeight !== Infinity && gameSize.tileWidth !== Infinity) numberOfUnrevealedTiles = gameSize.tileHeight * gameSize.tileWidth;
                 menuWrapper.classList.add("menu-hidden");
             });
 
             resetButton.addEventListener("click", () => {
+                if (client) return;
+
                 if (hosting) {
                     clientConnections.forEach(conn => conn.send({
                         type: "resetGame"
                     }));
-                    resetGame();
-                } else if (!client) {
-                    resetGame();
                 }
+
+                resetGame();
             });
 
             statsButton.addEventListener("click", () => {
@@ -661,11 +663,15 @@
                     case "changeGameHeight":
                         tileHeightInput.value = data.value;
                         break;
+                    case "mineCount":
+                        numberOfMines = data.count;
+                        break;
                     case "startGame":
                         if (gameStarted) break;
 
                         gameStarted = true;
                         gameSize = data.gameSize;
+                        if (gameSize.tileHeight !== Infinity && gameSize.tileWIdth !== Infinity) numberOfUnrevealedTiles = gameSize.tileWidth * gameSize.tileHeight;
                         resizeCanvas();
 
                         menuWrapper.classList.add("menu-hidden");
@@ -718,8 +724,8 @@
 
                         let playUnplantAudio = false;
 
-                        plantedFlags.forEach((map, flagI, _) => {
-                            map.forEach((_, flagJ) => {
+                        plantedFlags.forEach((map, flagJ, _) => {
+                            map.forEach((_, flagI) => {
                                 removeFlag(flagI, flagJ, true, false);
                                 playUnplantAudio = true;
                             });
@@ -850,12 +856,33 @@
                                             }));
 
                                             seed = data.seed;
-                                            plantedFlags.forEach((map, flagI, _) => {
-                                                map.forEach((_, flagJ) => {
+
+                                            if (gameSize.tileHeight !== Infinity && gameSize.tileWidth != Infinity) {
+                                                mineCountWorker.terminate();
+                                                mineCountWorker = new Worker(workerUrl);
+                                                mineCountWorker.postMessage({
+                                                    tileHeight: gameSize.tileHeight,
+                                                    tileWidth: gameSize.tileWidth,
+                                                    seed: seed
+                                                });
+                                                mineCountWorker.addEventListener("message", (e) => {
+                                                    numberOfMines = e.data;
+                                                    clientConnections.forEach(c => c.send({
+                                                        type: "mineCount",
+                                                        count: numberOfMines
+                                                    }));
+                                                });
+                                            }
+
+                                            let playFlagAudio = false;
+                                            plantedFlags.forEach((map, flagJ, _) => {
+                                                map.forEach((_, flagI) => {
                                                     removeFlag(flagI, flagJ, true, false);
+                                                    if (!playFlagAudio) playFlagAudio = true;
                                                 });
                                             });
-                                            playAudio(unplantFlagAudioBuffer);
+
+                                            if (playFlagAudio) playAudio(unplantFlagAudioBuffer);
                                             break;
                                     }
                                 });
@@ -1013,6 +1040,7 @@
             };
 
             let dead = false;
+            let won = false;
             let bombageddon = false;
             let bombageddonFinished = false;
             let bombageddonIncorrectFlagSoundPlayed = false;
@@ -1020,6 +1048,9 @@
             let animatingMines = [];
             let fallingConfetti = [];
 
+            let numberOfMines = 0;
+            let numberOfUnrevealedTiles;
+            
             const hueChangeCanvas = document.createElement('canvas');
             const hueChangeCTX = hueChangeCanvas.getContext('2d', { willReadFrequently: true });
 
@@ -1131,8 +1162,11 @@
 
                 if (checkIfTileOutOfBounds(i, j)) return;
                 revealTile(i, j);
-
                 if (checkIfMineAt(i, j)) return;
+                if (gameSize.tileWidth !== Infinity && gameSize.tileHeight !== Infinity) {
+                    numberOfUnrevealedTiles--;
+                    console.log(numberOfUnrevealedTiles);
+                };
 
                 if (getRevealedTileAdjacentMines(i, j) == 0) {
                     for (let potentialI = i - 1; potentialI < i + 2; potentialI++) {
@@ -1150,6 +1184,28 @@
 
                 if (!recursed) {
                     playAudio(digAudioBuffers[getRevealedTileAdjacentMines(i, j)]);
+                    if (gameSize.tileWidth !== Infinity && gameSize.tileHeight !== Infinity && numberOfUnrevealedTiles == numberOfMines) {
+                        won = frameTime;
+                        if (client) {
+                            resetButton.classList.add("hidden");
+                            statsButton.classList.remove("hidden");
+                        } else if (hosting) {
+                            resetButton.classList.remove("hidden");
+                            statsButton.classList.remove("hidden");
+
+                            clientConnections.forEach(conn => conn.send({
+                                type: "stats",
+                                stats: playerStats
+                            }));
+
+                            statsToLeaderboardHTML(playerStats);
+                        } else {
+                            resetButton.classList.remove("hidden");
+                            statsButton.classList.add("hidden");
+                        }
+
+                        deadMenuWrapper.classList.add("showing");
+                    }
                 }
             }
 
@@ -1234,19 +1290,19 @@
                 animatingFlags.push(new AnimatingFlag(i, j, index));
                 playAudio(plantFlagAudioBuffer);
 
-                if (!plantedFlags.has(i)) {
-                    plantedFlags.set(i, new Map());
+                if (!plantedFlags.has(j)) {
+                    plantedFlags.set(j, new Map());
                 }
 
-                plantedFlags.get(i).set(j, index);
+                plantedFlags.get(j).set(i, index);
             }
 
             /**
              * @returns {boolean | number} The flag index of the flag planted, or false if no flag was there
              */
             function checkIfFlagPlanted(i, j) {
-                if (plantedFlags.has(i) && plantedFlags.get(i).has(j)) return plantedFlags.get(i).get(j);
-                else return false;             
+                if (plantedFlags.has(j) && plantedFlags.get(j).has(i)) return plantedFlags.get(j).get(i);
+                else return false;
             }
 
             function checkIfFlagAnimating(i, j) {
@@ -1280,7 +1336,7 @@
                 });
             }
 
-            function removeFlag(i, j, silent = false, sendToPeers = true) {
+            function removeFlag(i, j, silent = false, sendToPeers = true, removeNicely = false) {
                 if (checkIfFlagPlanted(i, j) === false) return;
 
                 if (hosting && sendToPeers) {
@@ -1294,8 +1350,8 @@
 
                 if (!silent) playAudio(unplantFlagAudioBuffer);
 
-                fallingFlags.push(new FallingFlag(i, j, plantedFlags.get(i).get(j)));
-                plantedFlags.get(i).delete(j);
+                fallingFlags.push(new FallingFlag(i, j, plantedFlags.get(j).get(i), removeNicely));
+                plantedFlags.get(j).delete(i);
             }
 
             function addIncorrectFlag(i, j) {
@@ -1369,8 +1425,8 @@
 
                 let playUnplantAudio = false;
 
-                plantedFlags.forEach((map, flagI, _) => {
-                    map.forEach((_, flagJ) => {
+                plantedFlags.forEach((map, flagJ, _) => {
+                    map.forEach((_, flagI) => {
                         removeFlag(flagI, flagJ, true, false);
                         playUnplantAudio = true;
                     });
@@ -1483,7 +1539,7 @@
             }
 
             function checkIfTileHovered(i, j) {
-                if (dead) return false;
+                if (dead || won) return false;
 
                 for (let index = 0; index < hoveredTiles.length; index++) {
                     if (hoveredTiles[index].i == i && hoveredTiles[index].j == j) return index;
@@ -1552,7 +1608,7 @@
                 mouseDown = true;
                 inputRevealsTile = false;
 
-                if (!dead) {
+                if (!dead && !won) {
                     hoveredTile.i = Math.floor((mainTouchPosition.x * canvas.width / canvas.clientWidth + cameraCenter.x) / 45);
                     hoveredTile.j = Math.floor((mainTouchPosition.y * canvas.height / canvas.clientHeight + cameraCenter.y) / 45);
 
@@ -1600,6 +1656,7 @@
                 screenShakeOffset.y = 0;
 
                 dead = false;
+                won = false;
                 bombageddon = false;
                 bombageddonFinished = false;
                 bombageddonIncorrectFlagSoundPlayed = false;
@@ -1611,10 +1668,55 @@
                     playerStats.forEach(stat => stat.tilesRevealed = 0);
                 }
 
+                if (gameSize.tileHeight !== Infinity && gameSize.tileWIdth !== Infinity) numberOfUnrevealedTiles = gameSize.tileWidth * gameSize.tileHeight;
+
                 deadMenuWrapper.classList.remove("showing");
                 statsWrapper.classList.add("hidden");
                 statsButton.children[0].style.rotate = "";
             }
+
+            // Worker code
+            function countMines() {                
+                self.onmessage = function(e) {
+                    function hash(str) {
+                        let h1 = 0xdeadbeef ^ e.data.seed, h2 = 0x41c6ce57 ^ e.data.seed;
+                        for (let i = 0, ch; i < str.length; i++) {
+                            ch = str.charCodeAt(i);
+                            h1 = Math.imul(h1 ^ ch, 2654435761);
+                            h2 = Math.imul(h2 ^ ch, 1597334677);
+                        }
+                        h1  = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+                        h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+                        h2  = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+                        h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+                        return (4294967296 * (2097151 & h2) + (h1 >>> 0)) / Math.pow(2, 53);
+                    };
+                    let numberOfMines = 0;
+                    
+                    for (let i = 0; i < e.data.tileWidth; i++) {
+                        for (let j = 0; j < e.data.tileHeight; j++) {
+                            if (hash(`${i}+${j}`) < 0.2) numberOfMines++;
+                        }
+                    }
+
+                    // Send the result back to the main thread
+                    console.log(numberOfMines);
+                    self.postMessage(numberOfMines);
+                };
+            }
+
+            // Extract the function's body text
+            const codeString = countMines.toString();
+            const bodyString = codeString.substring(
+                codeString.indexOf("{") + 1, 
+                codeString.lastIndexOf("}")
+            );
+
+            // Create a Blob and Object URL from the string
+            const blob = new Blob([bodyString], { type: "application/javascript" });
+            const workerUrl = URL.createObjectURL(blob);
+
+            let mineCountWorker = new Worker(workerUrl);
 
             class FallingTile {
                 constructor(i, j, dx, dy) {
@@ -1668,11 +1770,11 @@
             }
 
             class FallingFlag {
-                constructor(i, j, index = 0) {
+                constructor(i, j, index = 0, fallNicely) {
                     this.x = i * 45 + 22;
                     this.y = j * 45 + 22;
-                    this.dx = Math.random() * 200 - 100;
-                    this.dy = Math.random() * -300 - 100;
+                    this.dx = fallNicely ? Math.random() * 50 - 25 : Math.random() * 200 - 100;
+                    this.dy = fallNicely ? Math.random() * -150 - 50 : Math.random() * -300 - 100;
                     this.dTheta = Math.random() * 2 * Math.PI - Math.PI;
                     this.timeCreated = frameTime;
                     this.dead = false;
@@ -1846,6 +1948,11 @@
 
                                 ctx.fillRect(i * 45 - cameraCenter.x, j * 45 - cameraCenter.y, 45, 45);
 
+                                if (won && frameTime < won + 1000) {
+                                    ctx.fillStyle = `rgb(255, 255, 255, ${(1000 - (frameTime - won)) / 2000})`;
+                                    ctx.fillRect(i * 45 - cameraCenter.x, j * 45 - cameraCenter.y, 45, 45);
+                                }
+
                                 if (checkIfFlagPlanted(i, j) !== false) {
                                     const hoveredTileHere = checkIfTileHovered(i, j);
 
@@ -1881,11 +1988,29 @@
                                 ctx.fillStyle = "#e5c29f";
                             }
                             ctx.fillRect(i * 45 - cameraCenter.x, j * 45 - cameraCenter.y, 45, 45);
+
                             // Add hoveredTile outline before border, number
                             const hoveredTileHere = checkIfTileHovered(i, j);
 
                             if (hoveredTileHere !== false && adjacentMines != 0) {
                                 ctx.fillStyle = hoveredTileColors[hoveredTileHere];
+                                ctx.fillRect(i * 45 - cameraCenter.x, j * 45 - cameraCenter.y, 45, 45);
+                            }
+
+                            // Now add text
+                            if (adjacentMines != 0) {
+                                ctx.fillStyle = mineNumberColors[adjacentMines];
+                                ctx.fillText(adjacentMines, i * 45 - cameraCenter.x + 22, j * 45 - cameraCenter.y + 36);
+                            }
+
+                            // Add blue wave if won
+                            if (won && frameTime > won + 500 + j * 500 / gameSize.tileHeight) {
+                                const frameOffset = frameTime - (won + 500 + j * 500 / gameSize.tileHeight);
+                                const blueOpacity = (frameOffset < 1000) ? frameOffset / 1000 : 1;
+
+                                if ((i + j) % 2 == 0) ctx.fillStyle = `rgb(144, 202, 249, ${blueOpacity})`;
+                                else ctx.fillStyle = `rgb(132, 196, 247, ${blueOpacity})`;
+
                                 ctx.fillRect(i * 45 - cameraCenter.x, j * 45 - cameraCenter.y, 45, 45);
                             }
 
@@ -1923,12 +2048,6 @@
                             if (!bottomRightOccupied && !checkIfTileRevealed(i + 1, j + 1) && !checkIfTileOutOfBounds(i + 1, j + 1)) {
                                 ctx.fillRect(i * 45 - cameraCenter.x + 41, j * 45 - cameraCenter.y + 41, 4, 4);
                             }
-
-                            // Now add text
-                            if (adjacentMines != 0) {
-                                ctx.fillStyle = mineNumberColors[adjacentMines];
-                                ctx.fillText(adjacentMines, i * 45 - cameraCenter.x + 22, j * 45 - cameraCenter.y + 36);
-                            }
                         }
 
                     }
@@ -1939,7 +2058,7 @@
                         ctx.fillStyle = "rgb(255, 255, 255, 0.25)";
                         ctx.fillRect(hoveredTile.i * 45 - cameraCenter.x, hoveredTile.j * 45 - cameraCenter.y, 45, 45);
                     }
-                } else if (!dead) {
+                } else if (!dead && !won) {
                     hoveredTiles.forEach((hTile, index) => {
                         if (hTile.i != null && !checkIfTileRevealed(hTile.i, hTile.j) && !checkIfMineRevealed(hTile.i, hTile.j) && checkIfFlagPlanted(hTile.i, hTile.j) === false) {
                             ctx.fillStyle = hoveredTileColors[index];
@@ -1970,8 +2089,8 @@
                         bombageddonFinished = true;
                         
                         // Reveal incorrect flags
-                        plantedFlags.forEach((map, flagI, _) => {
-                            map.forEach((_, flagJ) => {
+                        plantedFlags.forEach((map, flagJ, _) => {
+                            map.forEach((_, flagI) => {
                                 if (!checkIfMineAt(flagI, flagJ)) {
                                     removeFlag(flagI, flagJ, true, false);
                                     addIncorrectFlag(flagI, flagJ);
@@ -1983,6 +2102,18 @@
                             });
                         });
                     }
+                }
+
+                if (won && frameTime > won + 500) {
+                    const flagJCutoff = (frameTime - won - 500) * gameSize.tileHeight / 1000;
+
+                    plantedFlags.forEach((map, flagJ, _) => {
+                        if (flagJ < flagJCutoff) {
+                            map.forEach((_, flagI) => {
+                                removeFlag(flagI, flagJ, true, false, true);
+                            });
+                        }
+                    });
                 }
 
                 requestAnimationFrame(updateMap);
@@ -2008,7 +2139,7 @@
             canvas.addEventListener("contextmenu", ev => ev.preventDefault());
 
             canvas.addEventListener("mousedown", (event) => {
-                if (!dead) {
+                if (!dead && !won) {
                     hoveredTile.i = Math.floor((event.offsetX * canvas.width / canvas.clientWidth + cameraCenter.x) / 45);
                     hoveredTile.j = Math.floor((event.offsetY * canvas.height / canvas.clientHeight + cameraCenter.y) / 45);
                 }
@@ -2055,7 +2186,7 @@
                     }
                     else continue;
 
-                    if (!dead) {
+                    if (!dead && !won) {
                         hoveredTile.i = Math.floor((offsetX * canvas.width / canvas.clientWidth + cameraCenter.x) / 45);
                         hoveredTile.j = Math.floor((offsetY * canvas.height / canvas.clientHeight + cameraCenter.y) / 45);
                         
@@ -2112,7 +2243,7 @@
                     currentMouseGamePosition.x = (event.offsetX * canvas.width / canvas.clientWidth + cameraCenter.x);
                     currentMouseGamePosition.y = (event.offsetY * canvas.height / canvas.clientHeight + cameraCenter.y);
                     
-                    if (!dead) {
+                    if (!dead && !won) {
                         const potentialHoveredTileI = Math.floor(currentMouseGamePosition.x / 45);
                         const potentialHoveredTileJ = Math.floor(currentMouseGamePosition.y / 45);
                     
@@ -2149,7 +2280,7 @@
                     currentMouseGamePosition.x = ((event.offsetX - fullscreenDimensions.pillarBoxWidth) * canvas.width / fullscreenDimensions.width + cameraCenter.x)
                     currentMouseGamePosition.y = ((event.offsetY - fullscreenDimensions.letterBoxHeight) * canvas.height / fullscreenDimensions.height + cameraCenter.y);
 
-                    if (!dead) {
+                    if (!dead && !won) {
                         const potentialHoveredTileI = Math.floor(currentMouseGamePosition.x / 45);
                         const potentialHoveredTileJ = Math.floor(currentMouseGamePosition.y / 45);
                         
@@ -2201,7 +2332,7 @@
 
                         // Set hovered tile, pan
                         if (!(document.fullscreenElement == canvas)) {
-                            if (!dead) {
+                            if (!dead && !won) {
                                 const potentialHoveredTileI = Math.floor((offsetX * canvas.width / canvas.clientWidth + cameraCenter.x) / 45);
                                 const potentialHoveredTileJ = Math.floor((offsetY * canvas.height / canvas.clientHeight + cameraCenter.y) / 45);
                             
@@ -2235,7 +2366,7 @@
                             }
                         } else {
                             const fullscreenDimensions = getFullscreenDimensions();
-                            if (!dead) {
+                            if (!dead && !won) {
                                 const potentialHoveredTileI = Math.floor(((offsetX - fullscreenDimensions.pillarBoxWidth) * canvas.width / fullscreenDimensions.width + cameraCenter.x) / 45);
                                 const potentialHoveredTileJ = Math.floor(((offsetY - fullscreenDimensions.letterBoxHeight) * canvas.height / fullscreenDimensions.height + cameraCenter.y) / 45);
                                 
@@ -2306,6 +2437,25 @@
                                 }));
                             }
 
+                            if (!client && gameSize.tileHeight !== Infinity && gameSize.tileWidth != Infinity) {
+                                mineCountWorker.terminate();
+                                mineCountWorker = new Worker(workerUrl);
+                                mineCountWorker.postMessage({
+                                    tileHeight: gameSize.tileHeight,
+                                    tileWidth: gameSize.tileWidth,
+                                    seed: seed
+                                });
+                                mineCountWorker.addEventListener("message", (e) => {
+                                    numberOfMines = e.data;
+                                    if (hosting) {
+                                        clientConnections.forEach(c => c.send({
+                                            type: "mineCount",
+                                            count: numberOfMines
+                                        }));
+                                    }
+                                });
+                            }
+
                             screenShaking = frameTime;
                         }
 
@@ -2367,6 +2517,26 @@
                                         type: "seed",
                                         seed: seed,
                                     }));
+                                }
+
+                                if (!client && gameSize.tileHeight !== Infinity && gameSize.tileWidth != Infinity) {
+                                    mineCountWorker.terminate();
+                                    mineCountWorker = new Worker(workerUrl);
+                                    mineCountWorker.postMessage({
+                                        tileHeight: gameSize.tileHeight,
+                                        tileWidth: gameSize.tileWidth,
+                                        seed: seed
+                                    });
+
+                                    mineCountWorker.addEventListener("message", (e) => {
+                                        numberOfMines = e.data;
+                                        if (hosting) {
+                                            clientConnections.forEach(c => c.send({
+                                                type: "mineCount",
+                                                count: numberOfMines
+                                            }));
+                                        }
+                                    });
                                 }
 
                                 screenShaking = frameTime;
