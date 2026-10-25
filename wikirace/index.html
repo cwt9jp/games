@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>WikiRace</title>
+        <script type="text/javascript" src="/purify.min.js"></script>
+        <link id="wiki-styles-link" rel="stylesheet" href="" />
+        <link id="wiki-dynamic-styles-link" rel="stylesheet" href="" />
+        <style>
+            html {
+                --line-height-content: 1.625;
+            }
+
+            #body {
+                background-color: rgb(255, 222, 222);
+            }
+
+            #wiki-wrapper {
+                padding: 10px 20px;
+                margin: auto;
+                width: fit-content;
+            }
+
+            #wiki-body-wrapper {
+                grid-area: content;
+            }
+
+            a.disabled {
+                color: gray;
+                pointer-events: none;
+            }
+
+            #loading-screen {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100dvw;
+                height: 100dvh;
+
+                background-color: rgba(100, 100, 100, 0.3);
+                cursor: wait;
+
+                &.hidden {
+                    display: none;
+                }
+            }
+
+            .obscurity-span {
+                margin-left: 10px;
+                padding: 3px 5px;
+                border-radius: 4px;
+            }
+        </style>
+    </head>
+    <body id="body">
+        <div id="wiki-wrapper" class="mw-body">
+            <h1 id="wiki-page-title-wrapper" class="firstHeading mw-first-heading"></h1>
+            <main id="wiki-body-wrapper" class="mw-body-content vector-body"></main>
+        </div>
+        <div id="loading-screen"></div>
+
+        <script type="module">
+            import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1';
+
+            const wikiWrapper = document.getElementById("wiki-body-wrapper");
+            const titleWrapper = document.getElementById("wiki-page-title-wrapper");
+            const wikiStylesLink = document.getElementById("wiki-styles-link");
+            const wikiDynamicStylesLink = document.getElementById("wiki-dynamic-styles-link");
+            const loadingScreen = document.getElementById("loading-screen");
+
+            const parser = new DOMParser();
+
+            const currentDate = new Date();
+            const currentMonth = currentDate.getUTCMonth();
+            const currentYear = currentDate.getUTCFullYear();
+
+            const previousMonthDate = new Date();
+            previousMonthDate.setMonth(currentDate.getMonth() - 1);
+            const previousMonth = previousMonthDate.getUTCMonth();
+            const previousMonthYear = previousMonthDate.getUTCFullYear();
+
+            const recentMonthTimestamps = `${previousMonthYear}${previousMonth < 9 ? 0 : ""}${previousMonth + 1}01/${currentYear}${currentMonth < 9 ? 0 : ""}${currentMonth + 1}01`;
+
+            // TEMPORARY
+            const goalArticle = "World_War_II";
+
+            // // Embedder model
+            // const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+            //     dtype: 'q8'
+            // });
+
+            // const output = await extractor([goalArticle.split("_")], { pooling: 'mean', normalize: true });
+            // console.log(output);
+
+            const config = {
+                ALLOW_PORTALS: false,
+                ALLOW_DISAMBIGUATION: true,
+                ALLOW_SEE_ALSO: true,
+                ALLOW_REFERENCES: true,
+                ALLOW_WIKIPEDIA_LINKS: false
+            }
+            
+            DOMPurify.addHook(
+                'beforeSanitizeElements',
+                function (currentNode, hookEvent, config) {
+                    if (currentNode.classList && (
+                        currentNode.classList.contains("mw-editsection") ||
+                        currentNode.classList.contains("nv-view") ||
+                        currentNode.classList.contains("nv-talk") ||
+                        currentNode.classList.contains("nv-edit") ||
+                        currentNode.classList.contains("ambox")
+                    )) currentNode.remove();
+                }
+            );
+
+            DOMPurify.addHook(
+                'afterSanitizeAttributes',
+                function (currentNode, hookEvent, config) {
+                    if (currentNode.tagName == "A" && currentNode.href) {
+                        const relativeHref = currentNode.href.replace(/^([^\/]*\/){2}[^x]*?\//m, "");
+                        if (
+                            relativeHref.startsWith("wiki/") &&
+                            !relativeHref.startsWith("wiki/File:") &&
+                            (config.ALLOW_PORTALS || !relativeHref.startsWith("wiki/Portal:"))
+                        ) {
+                            currentNode.href = `javascript:getArticle("${relativeHref.replace("wiki/", "")}")`;
+                        } else if (!(relativeHref.startsWith("index.html#") || relativeHref.startsWith("#"))) {
+                            if (currentNode.classList && currentNode.classList.contains("external")) {
+                                currentNode.style.filter = "grayscale(1)";
+                            }
+                            currentNode.href = "";
+                            currentNode.classList.add("disabled");
+                        }
+                    }
+                }
+            );
+
+            async function getArticle(articleName) {
+                loadingScreen.classList.remove("hidden");
+
+                let section = null;
+                if (articleName.includes("#")) {
+                    const splitArticle = articleName.split("#");
+                    if (splitArticle.length > 1) {
+                        section = splitArticle[splitArticle.length - 1];
+                        articleName = splitArticle[0];
+                    }
+                }
+
+                try {
+                    const response = await fetch("https://en.wikipedia.org/w/api.php?action=parse&page=" + articleName + "&useskin=vector-2022&prop=text|headhtml|sections|displaytitle|title&format=json&redirects=1&origin=*");
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const articleJSON = data.parse;
+                    const articleObscurity = await getArticleObscurity(articleJSON.title);
+
+                    let i = 0;
+                    for (const match of articleJSON.headhtml["*"].matchAll(/<link rel="stylesheet" href="\/w\/load\.php\?(.*?)">/gm)) {
+                        if (i == 0) {
+                            wikiStylesLink.href = "https://en.wikipedia.org/w/load.php?origin=*&" + parser.parseFromString(match[1], 'text/html').documentElement.textContent;
+                        } else if (i == 1) {
+                            wikiDynamicStylesLink.href = "https://en.wikipedia.org/w/load.php?origin=*&" + parser.parseFromString(match[1], 'text/html').documentElement.textContent;
+                            break;
+                        }
+
+                        i++;
+                    }
+
+                    const cleanArticleHTML = DOMPurify.sanitize(articleJSON.text["*"], {
+                        ADD_ATTR: ["typeof"],
+                        ALLOW_UNKNOWN_PROTOCOLS: true
+                    });
+                    const cleanTitleHTML = DOMPurify.sanitize(articleJSON.displaytitle);
+
+                    wikiWrapper.innerHTML = cleanArticleHTML;
+                    titleWrapper.innerHTML = cleanTitleHTML;
+
+                    const obscuritySpan = document.createElement("span");
+                    obscuritySpan.classList.add("obscurity-span");
+                    obscuritySpan.textContent = Math.round(articleObscurity * 10) / 10;
+
+                    let backgroundColor;
+                    if (articleObscurity < 5) {
+                        const gradientPercentage = articleObscurity / 5;
+                        backgroundColor = `rgb(${30 * (1 - gradientPercentage) + 255 * gradientPercentage}, ${150 * (1 - gradientPercentage) + 242 * gradientPercentage}, 0)`;
+                    } else {
+                        const gradientPercentage = (articleObscurity - 5) / 5;
+                        backgroundColor = `rgb(255, ${242 * (1 - gradientPercentage)}, 0)`;
+                    }
+                    obscuritySpan.style.backgroundColor = backgroundColor;
+
+                    titleWrapper.append(obscuritySpan);
+
+                    if (section) window.location.hash = section;
+                    else {
+                        window.scrollTo({
+                            top: 0,
+                            behavior: "instant"
+                        });
+                        window.location.hash = "";
+                    }
+                } catch (e) {
+                    console.error("Failed to fetch: ", e);
+                }
+
+                loadingScreen.classList.add("hidden");
+            }
+
+            async function getArticleObscurity(articleName) {
+                try {
+                    const response = await fetch(`https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/${articleName}/monthly/${recentMonthTimestamps}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const monthlyViews = data.items[0].views;
+
+                    return Math.min(Math.max(0, -5 * Math.log10(monthlyViews / 100000)), 10);
+                } catch (e) {
+                    console.error("Failed to fetch: ", e);
+                }
+            }
+
+            getArticle("Upper_Maleri_Formation");
+            window.getArticle = getArticle;
+        </script>
+    </body>
+</html>

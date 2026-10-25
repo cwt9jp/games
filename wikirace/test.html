@@ -1,0 +1,25 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test</title>
+</head>
+<body>
+    <script type="module">
+        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2';
+
+        async function run() {
+            // q8 enables 8-bit quantization: smaller download (~23MB) with near-identical accuracy
+            const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { dtype: 'q8' });
+            
+            const output = await extractor('Running models directly in the browser!', {
+                pooling: 'mean',
+                normalize: true
+            });
+
+            console.log(output.tolist()[0]);
+        }
+        run();
+    </script>
+</body>
+</html>
