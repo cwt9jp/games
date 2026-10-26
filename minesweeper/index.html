@@ -564,11 +564,13 @@
                         });
                     });
 
+                    const sentGameSize = gameSize.tileHeight == Infinity ? "infinite" : gameSize;
+
                     clientConnections.forEach(conn => {
                         conn.send({
                             type: "startGame",
                             peerIDs: clientConnectionIDs,
-                            gameSize: gameSize
+                            gameSize: sentGameSize
                         });
                     });
                     
@@ -670,7 +672,12 @@
                         if (gameStarted) break;
 
                         gameStarted = true;
-                        gameSize = data.gameSize;
+                        if (data.gameSize == "infinity") {
+                            gameSize.tileHeight = Infinity;
+                            gameSize.tileWidth = Infinity;
+                        } else {
+                            gameSize = data.gameSize;
+                        }
                         if (gameSize.tileHeight !== Infinity && gameSize.tileWIdth !== Infinity) numberOfUnrevealedTiles = gameSize.tileWidth * gameSize.tileHeight;
                         resizeCanvas();
 
