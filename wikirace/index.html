@@ -61,7 +61,7 @@
         <div id="loading-screen"></div>
 
         <script type="module">
-            import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1';
+            import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1';
 
             const wikiWrapper = document.getElementById("wiki-body-wrapper");
             const titleWrapper = document.getElementById("wiki-page-title-wrapper");
@@ -85,13 +85,16 @@
             // TEMPORARY
             const goalArticle = "World_War_II";
 
-            // // Embedder model
-            // const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-            //     dtype: 'q8'
-            // });
-
-            // const output = await extractor([goalArticle.split("_")], { pooling: 'mean', normalize: true });
-            // console.log(output);
+            // Embedder model
+            env.allowLocalModels = true;       // Enable local model loading
+            env.allowRemoteModels = false;     // Disable downloading from Hugging Face Hub
+            env.localModelPath = '/models/';
+            const extractor = await pipeline('feature-extraction', 'all-MiniLM-L6-v2', {
+                dtype: 'q8'
+            });
+            
+            const output = await extractor([goalArticle.split("_")], { pooling: 'mean', normalize: true });
+            console.log(output);
 
             const config = {
                 ALLOW_PORTALS: false,
