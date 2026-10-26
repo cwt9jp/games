@@ -86,7 +86,8 @@
             const goalArticle = "World_War_II";
 
             // Embedder model
-            env.allowLocalModels = true;       // Enable local model loading
+            env.allowLocalModels = true;
+            env.useBrowserCache = false;       // Enable local model loading
             env.allowRemoteModels = false;     // Disable downloading from Hugging Face Hub
             env.localModelPath = '/models/';
             const extractor = await pipeline('feature-extraction', 'all-MiniLM-L6-v2', {
@@ -94,7 +95,7 @@
             });
             
             const output = await extractor([goalArticle.split("_")], { pooling: 'mean', normalize: true });
-            console.log(output);
+            console.log(Array.from(output.data));
 
             const config = {
                 ALLOW_PORTALS: false,

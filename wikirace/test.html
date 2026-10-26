@@ -1,28 +1,50 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test</title>
+    <title>all-MiniLM-L6-v2 in Browser CDN</title>
 </head>
 <body>
+    <h1>Open your Browser Console see the Embeddings!</h1>
+
     <script type="module">
-        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2';
+        // Import Transformers.js from a modern JS CDN
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1/dist/transformers.min.js';
 
-        async function run() {
-            // Embedder model
-            env.allowLocalModels = true;       // Enable local model loading
-            env.allowRemoteModels = false;     // Disable downloading from Hugging Face Hub
-            env.localModelPath = './models/';
+        // Configure to fetch and store models locally in the browser
+        env.useBrowserCache = false;      // Automatically cache the model weights in IndexedDB
+        env.allowRemoteModels = false;
+        env.allowLocalModels = true;    // Force it to download from Hugging Face CDN instead of looking for local folders
+        env.localModelPath = '/models/';
 
-            const extractor = await pipeline('feature-extraction', 'all-MiniLM-L6-v2', {
-                dtype: 'q8',
-                model_file_name: 'model'
-            });
+        async function main() {
+            console.log("Loading model... (This may take a moment on the first run)");
             
-            const output = await extractor(["The Upper Maleri Formation is a sedimentary rock formation found in Telangana, India."], { pooling: 'mean', normalize: true });
-            console.log(output);
+            // Allocate the feature-extraction pipeline for all-MiniLM-L6-v2
+            const extractor = await pipeline('feature-extraction', 'all-MiniLM-L6-v2', {
+                dtype: "q8"
+            });
+
+            // Pass your text query
+            const text = "The sky is blue because of Rayleigh scattering";
+            console.log(`Generating embedding for: "${text}"`);
+
+            // Compute the embeddings with mean pooling and L2 normalization
+            const output = await extractor(text, {
+                pooling: 'mean',
+                normalize: true,
+            });
+
+            // Extract the flat Float32Array and convert it to a standard JS array
+            const embeddingVector = Array.from(output.data);
+            
+            console.log("Embedding Generation Complete!");
+            console.log("Vector Dimensions:", output.dims); // Should print [1, 384]
+            console.log("Embedding Vector Snippet:", embeddingVector.slice(0, 5), "...");
         }
-        run();
+
+        main().catch(err => console.error("Error executing model:", err));
     </script>
 </body>
 </html>
