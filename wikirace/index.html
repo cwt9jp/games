@@ -104,13 +104,14 @@
             const recentMonthTimestamps = `${previousMonthYear}${previousMonth < 9 ? 0 : ""}${previousMonth + 1}01/${currentYear}${currentMonth < 9 ? 0 : ""}${currentMonth + 1}01`;
 
             // TEMPORARY
-            const goalArticle = "Albemarle_High_School_(Virginia)";
+            const goalArticle = "Scientific_racism";
+            const startingArticle = "Albemarle_High_School_(Virginia)";
 
             // Embedder model
             env.allowLocalModels = true;
             env.useBrowserCache = false;       // Enable local model loading
             env.allowRemoteModels = false;     // Disable downloading from Hugging Face Hub
-            env.localModelPath = '/models/';
+            env.localModelPath = 'models/';
             const extractor = await pipeline('feature-extraction', 'all-MiniLM-L6-v2', {
                 dtype: 'q8'
             });
@@ -301,7 +302,7 @@
                 console.error("First sentence not detected.");
             }
 
-            getArticle("Vietnam War");
+            getArticle(startingArticle);
             window.getArticle = getArticle;
         </script>
     </body>
