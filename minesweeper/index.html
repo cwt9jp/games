@@ -488,7 +488,11 @@
                         }
                     }
 
-                    serverConnection = peer.connect(lobbyIDInput.value);
+                    serverConnection = peer.connect(lobbyIDInput.value, {
+                        metadata: {
+                            game: "minesweeper"
+                        }
+                    });
 
                     serverConnection.on("open", () => {
                         readyButton.disabled = false;
@@ -766,6 +770,11 @@
 
                     peer.on("connection", (conn) => {
                         if (hosting) {
+                            if (conn.metadata.game != "minesweeper") {
+                                conn.close();
+                                return;
+                            }
+
                             clientConnections.push(conn);
                             conn.ready = false;
 

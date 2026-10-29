@@ -4,7 +4,7 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>WikiRace</title>
-        <script type="text/javascript" src="purify.min.js"></script>
+        <script type="text/javascript" src="src/scripts/purify.min.js"></script>
         <link id="wiki-styles-link" rel="stylesheet" href="" />
         <link id="wiki-dynamic-styles-link" rel="stylesheet" href="" />
         <style>
@@ -57,7 +57,8 @@
                 height: 4px;
                 margin-top: 5px;
                 background: linear-gradient(to right, transparent, #36c);
-                position: relative;
+                position: fixed;
+                z-index: 10;
             }
 
             .progress-pointer {
@@ -68,9 +69,83 @@
 
                 transition: left 0.3s ease-in-out;
             }
+
+            /* Main menu styles */
+            @font-face {
+                font-family: 'Linux Libertine Local';
+                src: url('src/fonts/LinLibertine_aS.ttf') format('woff');
+                font-weight: normal;
+                font-style: normal;
+                font-variant: small-caps;
+            }
+
+            @font-face {
+                font-family: 'Linux Libertine Local';
+                src: url('src/fonts/LinLibertine_R.ttf') format('woff');
+                font-weight: normal;
+                font-style: normal;
+            }
+
+            #main-menu-wrapper {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+
+                position: fixed;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                right: 0;
+
+                z-index: 100;
+
+                background-color: white;
+
+                & * {
+                    font-family: "Segoe UI", "Roboto", "Inter", "Helvetica", "Arial", sans-serif;
+                }
+
+                & h1 {
+                    font-family: 'Linux Libertine Local', "Georgia", serif;
+                    font-weight: normal;
+                    font-variant: small-caps;
+                    font-size: 30pt;
+                    margin-block: 40px 2px;
+
+                    border: none;
+                }
+
+                & strong {
+                    font-family: 'Linux Libertine Local', 'Georgia', serif;
+                    font-weight: 400;
+                    letter-spacing: -0.1px;
+                }
+
+                & #wikipedia-logo {
+                    margin-block: 50px 30px;
+                }
+
+                & .article-input {
+                    padding: 10px;
+                    border: 1px solid gray;
+                    border-radius: 2px;
+                    font-size: 12pt;
+                }
+            }
         </style>
     </head>
     <body id="body">
+        <div id="main-menu-wrapper">
+            <h1>WikiRace</h1>
+            <strong>Race the Free Encyclopedia</strong>
+            <img src="src/images/wikipedia-logo.png" width="200" id="wikipedia-logo" />
+            <div id="input-wrapper">
+                <input type="text" id="starting-article-input" class="article-input" placeholder="Starting article" />
+                <span style="margin-block: 20px">to</span>
+                <input type="text" id="goal-article-input" class="article-input" placeholder="Goal article" />
+            </div>
+            <div style="padding: 50vh"></div>
+        </div>
         <div id="progress-div">
             <div id="self-pointer" class="progress-pointer">➤</div>
         </div>
@@ -104,14 +179,14 @@
             const recentMonthTimestamps = `${previousMonthYear}${previousMonth < 9 ? 0 : ""}${previousMonth + 1}01/${currentYear}${currentMonth < 9 ? 0 : ""}${currentMonth + 1}01`;
 
             // TEMPORARY
-            const goalArticle = "Scientific_racism";
+            const goalArticle = "Autodesk_Fusion";
             const startingArticle = "Albemarle_High_School_(Virginia)";
 
             // Embedder model
             env.allowLocalModels = true;
             env.useBrowserCache = false;       // Enable local model loading
             env.allowRemoteModels = false;     // Disable downloading from Hugging Face Hub
-            env.localModelPath = 'models/';
+            env.localModelPath = 'src/models/';
             const extractor = await pipeline('feature-extraction', 'all-MiniLM-L6-v2', {
                 dtype: 'q8'
             });
@@ -251,12 +326,16 @@
                     titleWrapper.append(obscuritySpan);
 
                     // Show closeness to goal
-                    const articleFirstParagraph = getArticleFirstParagraph();
-                    const result = await extractor(articleFirstParagraph, { pooling: 'mean', normalize: true });
-                    const articleVector = result.data;
-                    const dotProduct = goalVector.reduce((sum, val, i) => sum + val * articleVector[i], 0);
-                    const scaledDotProduct = dotProduct < 0.75 ? Math.pow(Math.sin((dotProduct + 0.25) * Math.PI / 2), 3) : 1;
-                    selfPointer.style.left = scaledDotProduct * 100 + "%";
+                    if (articleJSON.title.replace(" ", "_") === goalArticle) {
+                        selfPointer.style.left = "100%";
+                    } else {
+                        const articleFirstParagraph = getArticleFirstParagraph();
+                        const result = await extractor(articleFirstParagraph, { pooling: 'mean', normalize: true });
+                        const articleVector = result.data;
+                        const dotProduct = goalVector.reduce((sum, val, i) => sum + val * articleVector[i], 0);
+                        const scaledDotProduct = dotProduct < 0.75 ? Math.pow(Math.sin((dotProduct + 0.25) * Math.PI / 2), 3) : 0.98;
+                        selfPointer.style.left = articleJSON.title === goalArticle ? "100%" : scaledDotProduct * 100 + "%";
+                    }
                     
 
                     if (section) window.location.hash = section;
@@ -302,7 +381,7 @@
                 console.error("First sentence not detected.");
             }
 
-            getArticle(startingArticle);
+            // getArticle(startingArticle);
             window.getArticle = getArticle;
         </script>
     </body>
